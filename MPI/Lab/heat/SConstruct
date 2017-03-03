@@ -1,0 +1,16 @@
+import os
+env = Environment(ENV = os.environ)
+
+# change here the source files and executable name
+sources = ["gs_heat_plate_mpi.f90","kind.f90","mympi.f90"]
+#sources = ["test.f90","kind.f90","mympi.f90"]
+executableName = "gs_heat_plate_mpi"
+
+# change here for compiler and compiler options
+env['F90'] = "mpif90"
+#env['F90FLAGS'] = "-fastsse -Mipa=fast -O4 -Minfo"
+env['F90FLAGS'] = "-g"
+env['LINK'] = "mpif90"
+
+env.Program(target = executableName , source = sources)
+
