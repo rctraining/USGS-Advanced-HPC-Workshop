@@ -5,7 +5,7 @@ PROGRAM MAIN
     INTEGER ::  nx,ny,nz,nt
     REAL( real64) :: ct_one, ct_two, ct_three
     REAL( real64) :: elapsed_time, loop_time, init_time
-    INTEGER :: i,j,k,n
+    INTEGER :: i,j,k,n, nq, nkgpu
     CALL cpu_time( time= ct_one)
     !////////////////////////////////////////////////////
     ! Set some default values for the problem parameters.
@@ -13,19 +13,26 @@ PROGRAM MAIN
     ny = 256   ! y-dimension of our 3-D array
     nz = 256   ! z-dimension of our 3-D array
     nt = 100   ! number of time steps to integrate over
-
+    nq = 4     ! The number of OpenACC queues to employ
+    nkgpu = nz ! GPU handles z-levels from 2 through nkgpu-1
     !////////////////////////////////////////////////////
     ! Check to see if the user has specified anything 
     ! different at the command line.
-    CALL grab_args(nx,ny,nz,nt)
+    CALL grab_args(nx,ny,nz,nt,nq,nkgpu)
+
+    ! IF the value of nk_GPU doesn't make sense, set it to nz.
+    IF (nkGPU .lt. 1) nkGPU = nz
+    IF (nkGPU .gt. nz) nkGPU = nz
 
     WRITE(output_unit,'(a)') ' ///////////////////////////'
     WRITE(output_unit,'(a)') '  3-D Diffusion Equation   '
     WRITE(output_unit,'(a)') '  --Problem Parameters-- '
-    WRITE(output_unit,'(a,i0)')'   nx =', nx
-    WRITE(output_unit,'(a,i0)')'   ny =', ny
-    WRITE(output_unit,'(a,i0)')'   nz =', nz
-    WRITE(output_unit,'(a,i0)')'   nt =', nt
+    WRITE(output_unit,'(a,i0)')'      nx =', nx
+    WRITE(output_unit,'(a,i0)')'      ny =', ny
+    WRITE(output_unit,'(a,i0)')'      nz =', nz
+    WRITE(output_unit,'(a,i0)')'      nt =', nt
+    WRITE(output_unit,'(a,i0)')'      nq =', nq
+    WRITE(output_unit,'(a,i0)')'   nkgpu =', nkgpu 
     WRITE(output_unit,'(a)') ' ///////////////////////////'
     WRITE(output_unit,'(a)') ' '
     !/////////////////////////////////////////////////////
@@ -37,17 +44,41 @@ PROGRAM MAIN
     tmp(:,:,:)   = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
     !/////////////////////////////////////////////////////
-    ! Evolve the system
+    ! Evolve the system:
+
+
+    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
+
     Write(6,*) var(nx/4-2:nx/4+2,ny/4,5)
     Write(6,*) var(nx/4-2:nx/4+2,ny/4,nz-5)
+    ! Create an initial copy of var and tmp on the GPU
+    !$ACC enter data copyin(var, tmp)
+
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
         IF (MOD(n,10) .eq. 0) Write(output_unit,'(a,i5)')' Timestep: ',n
-        CALL Laplacian(var,tmp)
+
+        CALL Laplacian(var,tmp,nq,nkgpu)
+
+
+        !/////////////////////////////////////
+        ! This piece is carried out on the CPU 
+        CALL GHOST_ZONE_COMM(var)
+        
     ENDDO
+    !Write(6,*) ' '
+    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
+    !Write(6,*) ' '
+
+    CALL cpu_time( time= ct_three)
+    ! At the end, copy out the GPU portion of the var array and delete var & tmp on the GPU
+    !$ACC update host(var(1:nx,1:ny,2:nkGPU-1))
+    !$ACC exit data delete(var,tmp)
+
     Write(6,*) var(nx/4-2:nx/4+2,ny/4,5)
     Write(6,*) var(nx/4-2:nx/4+2,ny/4,nz-5)
-    CALL cpu_time( time= ct_three)
+
+
     elapsed_time = ct_three-ct_one
     init_time = ct_two-ct_one
     loop_time = ct_three-ct_two
@@ -59,20 +90,40 @@ PROGRAM MAIN
     
 CONTAINS
 
-
-    SUBROUTINE Laplacian(arrin, work)
+    SUBROUTINE Laplacian(arrin, work,numq,nk_GPU)
         IMPLICIT NONE
         REAL*8, INTENT(InOut) :: arrin(:,:,:)
         REAL*8, INTENT(InOut) :: work(:,:,:)
         Real*8 :: one_sixth
-        INTEGER :: dims(3), ni, nj, nk
+        INTEGER :: dims(3), ni, nj, nk, queue
+        INTEGER, INTENT(In) :: numq, nk_GPU
         dims = shape(arrin)
         nk = dims(3)
         nj = dims(2)
         ni = dims(1)
         one_sixth = 1.0d0/6.0d0
 
-        DO k = 2, nk-1
+        !$acc update device(var(1:nx,1:ny,1), var(1:nx,1:ny,nk_gpu))
+        DO k = 2, nk_GPU-1
+            queue = MOD(k,numq)+1
+
+            !$acc  update device(var(nx,1:ny,k),var(1,1:ny,k), &
+            !$acc    var(1:nx,1,k), var(1:nx,ny,k)) async(queue)
+            !$acc parallel loop present(arrin,work) collapse(2) async(queue)
+            DO j = 2, nj-1
+                DO i = 2, ni-1
+                    work(i,j,k) =  &
+                            arrin(i-1,j,k) + arrin(i+1,j,k) + &
+                            arrin(i,j-1,k) + arrin(i,j+1,k) + & 
+                            arrin(i,j,k-1) + arrin(i,j,k+1)
+                ENDDO
+            ENDDO
+            !$acc end parallel loop
+        ENDDO
+
+        !/////////////////////////////
+        ! CPU portion
+        DO k = nk_GPU, nk-1
             DO j = 2, nj-1
                 DO i = 2, ni-1
                     work(i,j,k) =  &
@@ -83,24 +134,74 @@ CONTAINS
             ENDDO
         ENDDO
 
-        DO k = 2, nk-1
+
+        !$ACC WAIT
+
+        
+        DO k = 2, nk_GPU-1
+            queue = MOD(k,numq)+1
+            !$acc parallel loop present(arrin,work) collapse(2) async(queue)
             DO j = 2, nj-1
                 DO i = 2, ni-1
                     arrin(i,j,k) = work(i,j,k)*one_sixth
                 ENDDO
             ENDDO
+            !$acc end parallel loop
+            !$acc  update host(var(nx-1,1:ny,k),var(2,1:ny,k), &
+            !$acc    var(1:nx,2,k), var(1:nx,ny-1,k)) async(queue)
+        ENDDO
+
+        !////////////////////////////////////////////
+        ! CPU Portion
+        DO k = nk_GPU, nk-1
+            DO j = 2, nj-1
+                DO i = 2, ni-1
+                    arrin(i,j,k) = work(i,j,k)*one_sixth
+                ENDDO
+            ENDDO
+
         ENDDO
 
 
+        !$ACC WAIT
+        !$acc update host(var(1:nx,1:ny,2), var(1:nx,1:ny,nk_GPU-1))
     END SUBROUTINE Laplacian
 
-    SUBROUTINE grab_args(numx, numy, numz, numiter)
+
+    SUBROUTINE GHOST_ZONE_COMM(arr)
+        IMPLICIT NONE
+        REAL*8, INTENT(INOUT) :: arr(:,:,:)
+        INTEGER :: dims(3)
+        INTEGER :: i, j, k
+        INTEGER :: ni, nj, nk
+        dims = shape(arr)
+        ni = dims(1)
+        nj = dims(2)
+        nk = dims(3)
+        ! This is where we would normally communicate boundary
+        ! information.
+        !
+        ! For this example, rather than invoking MPI here, 
+        ! we simply copy the rightmost boundary to the leftmost boundary...
+
+
+        DO k = 1, nk
+            arr(1,:,k) = arr(ni,:,k)
+            arr(:,1,k) = arr(:,nj,k)
+        ENDDO
+        arr(:,:,1) = arr(:,:,nk)
+
+    END SUBROUTINE GHOST_ZONE_COMM
+
+
+    SUBROUTINE grab_args(numx, numy, numz, numiter, numq, nk_gpu)
             IMPLICIT NONE
 
             INTEGER, INTENT(OUT)   :: numx
             INTEGER, INTENT(OUT)   :: numy
             INTEGER, INTENT(OUT)   :: numz
             INTEGER, INTENT(OUT)   :: numiter
+            INTEGER, INTENT(INOUT) :: numq, nk_gpu
 
 
             INTEGER :: n                    ! Number of command-line arguments
@@ -123,12 +224,17 @@ CONTAINS
                                     read(val, '(I8)') numz
                             CASE('-nt')
                                     read(val, '(I8)') numiter
+                            CASE('-nq')
+                                    read(val, '(I8)') numq
+                            CASE('-nkgpu')
+                                    read(val, '(I8)') nk_gpu
                             CASE DEFAULT
                                     WRITE(output_unit,'(a)') ' '
                                     WRITE(output_unit,'(a)') &
                                     ' Unrecognized option: '// trim(argname)
                     END SELECT
             ENDDO
+
 
 
     END SUBROUTINE grab_args
@@ -162,4 +268,5 @@ CONTAINS
             ENDDO
         ENDDO
     END SUBROUTINE INIT_ARR
+
 END PROGRAM MAIN
