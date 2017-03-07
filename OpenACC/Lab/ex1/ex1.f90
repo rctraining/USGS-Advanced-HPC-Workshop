@@ -35,16 +35,19 @@ PROGRAM MAIN
     
     var(:,:,:) = 0.0d0
     tmp(:,:,:)   = 0.0d0
-
+    CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
     !/////////////////////////////////////////////////////
     ! Evolve the system
 
     CALL cpu_time( time= ct_two)
-    DO n = 1, nt,2
+    DO n = 1, nt
         Write(output_unit,'(a,i5)')' Timestep: ',n
-        CALL Laplacian(var,tmp)
-        Write(output_unit,'(a,i5)')' Timestep: ',n+1
-        CALL Laplacian(tmp,var)
+        IF (MOD(n,2) .eq. 1) Then
+            CALL Laplacian(var,tmp)
+        ELSE
+            CALL Laplacian(tmp,var)
+        ENDIF
+
     ENDDO
 
     CALL cpu_time( time= ct_three)
@@ -127,4 +130,32 @@ CONTAINS
 
     END SUBROUTINE grab_args
 
+    SUBROUTINE INIT_ARR(arr, amp, orderx, ordery, orderz)
+        IMPLICIT NONE
+        REAL*8, INTENT(INOUT) :: arr(:,:,:)
+        REAL*8, INTENT(IN) :: amp
+        INTEGER, INTENT(IN) :: orderx, ordery, orderz
+        REAL*8 :: sinkx, sinky, sinkz
+        REAL*8 :: kx, ky, kz
+        REAL*8, PARAMETER :: pi = 3.1415926535897932384626433832795028841972d0
+        INTEGER :: i,j,k, dims(3), ni,nj,nk
+        nk = dims(3)
+        nj = dims(2)
+        ni = dims(1)
+
+        kx = orderx*(pi/(ni-1))
+        ky = ordery*(pi/(nj-1))
+        kz = orderz*(pi/(nk-1))
+        dims = shape(arr)
+        DO k = 1, nk
+            sinkz = sin(kz*k)
+            DO j = 1, nj
+                sinky = sin(ky*j)
+                DO i = 1, ni
+                    sinkx = sin(kx*i)
+                    arr(i,j,k) = arr(i,j,k)+amp*sinkx*sinky*sinkz
+                ENDDO
+            ENDDO
+        ENDDO
+    END SUBROUTINE INIT_ARR
 END PROGRAM MAIN

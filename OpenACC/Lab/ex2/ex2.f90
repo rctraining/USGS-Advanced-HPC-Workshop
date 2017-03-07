@@ -35,29 +35,19 @@ PROGRAM MAIN
     
     var(:,:,:) = 0.0d0
     tmp(:,:,:)   = 0.0d0
-    CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
+
     !/////////////////////////////////////////////////////
     ! Evolve the system
 
-    ! We bracket the loop with acc data 
-    ! var and tmp are copied to the GPU
-    !$acc data copy(var, tmp)
-
     CALL cpu_time( time= ct_two)
-    DO n = 1, nt
+    DO n = 1, nt,2
         Write(output_unit,'(a,i5)')' Timestep: ',n
-        IF (MOD(n,2) .eq. 1) Then
-            CALL Laplacian(var,tmp)
-        ELSE
-            CALL Laplacian(tmp,var)
-        ENDIF
-        
+        CALL Laplacian(var,tmp)
+        Write(output_unit,'(a,i5)')' Timestep: ',n+1
+        CALL Laplacian(tmp,var)
     ENDDO
+
     CALL cpu_time( time= ct_three)
-    !$acc end data
-    !When end data is encountered, var and tmp are copied back to the CPU
-
-
     elapsed_time = ct_three-ct_one
     init_time = ct_two-ct_one
     loop_time = ct_three-ct_two
@@ -78,18 +68,15 @@ CONTAINS
         nk = dims(3)
         nj = dims(2)
         ni = dims(1)
-        !$acc parallel loop present(arrin,arrout) collapse(3)
         DO k = 2, nk-1
             DO j = 2, nj-1
                 DO i = 2, ni-1
                     arrout(i,j,k) = arrin(i,j,k) + &
                             arrin(i-1,j,k) + arrin(i+1,j,k) + &
-                            arrin(i,j-1,k) + arrin(i,j+1,k) + & 
-                            arrin(i,j,k-1) + arrin(i,j,k+1)
+                            arrin(i,j-1,k) + arrin(i,j+1,k)  
                 ENDDO
             ENDDO
         ENDDO
-        !$acc end parallel loop
     END SUBROUTINE Laplacian
 
     SUBROUTINE grab_args(numx, numy, numz, numiter)
@@ -139,34 +126,5 @@ CONTAINS
 
 
     END SUBROUTINE grab_args
-
-    SUBROUTINE INIT_ARR(arr, amp, orderx, ordery, orderz)
-        IMPLICIT NONE
-        REAL*8, INTENT(INOUT) :: arr(:,:,:)
-        REAL*8, INTENT(IN) :: amp
-        INTEGER, INTENT(IN) :: orderx, ordery, orderz
-        REAL*8 :: sinkx, sinky, sinkz
-        REAL*8 :: kx, ky, kz
-        REAL*8, PARAMETER :: pi = 3.1415926535897932384626433832795028841972d0
-        INTEGER :: i,j,k, dims(3), ni,nj,nk
-        nk = dims(3)
-        nj = dims(2)
-        ni = dims(1)
-
-        kx = orderx*(pi/(ni-1))
-        ky = ordery*(pi/(nj-1))
-        kz = orderz*(pi/(nk-1))
-        dims = shape(arr)
-        DO k = 1, nk
-            sinkz = sin(kz*k)
-            DO j = 1, nj
-                sinky = sin(ky*j)
-                DO i = 1, ni
-                    sinkx = sin(kx*i)
-                    arr(i,j,k) = arr(i,j,k)+amp*sinkx*sinky*sinkz
-                ENDDO
-            ENDDO
-        ENDDO
-    END SUBROUTINE INIT_ARR
 
 END PROGRAM MAIN
