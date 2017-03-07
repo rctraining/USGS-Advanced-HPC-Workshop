@@ -37,15 +37,16 @@ PROGRAM MAIN
     tmp(:,:,:)   = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
     !/////////////////////////////////////////////////////
-    ! Evolve the system
-
+    ! Evolve the system:
     ! When running a parallel code, we inevitably need to pull data
     ! off of the GPU and carry out communication or non-GPU operations.
-    ! The update and ghost-zone communication functions below are 
-    ! intended to mimic this situation and should be carried out only
+    ! The GHOST_ZONE_COMM function below serves as a placeholder
+    ! for this communication and is assumed to be carried out on
     ! the CPU.  Modify the data movement portions of the code to
     ! reflect the fact that var should be updated on the CPU prior
-    ! to the update and ghost-zone communication.
+    ! to ghost-zone communication.
+
+
 
 
 
@@ -57,7 +58,6 @@ PROGRAM MAIN
         !$acc end data
         !/////////////////////////////////////
         ! This piece is carried out on the CPU 
-        var = var+tmp
         CALL GHOST_ZONE_COMM(var)
         
     ENDDO
@@ -77,20 +77,22 @@ PROGRAM MAIN
     
 CONTAINS
 
-    SUBROUTINE Laplacian(arrin, arrout)
+    SUBROUTINE Laplacian(arrin, work)
         IMPLICIT NONE
-        REAL*8, INTENT(In) :: arrin(:,:,:)
-        REAL*8, INTENT(Out) :: arrout(:,:,:)
+        REAL*8, INTENT(InOut) :: arrin(:,:,:)
+        REAL*8, INTENT(InOut) :: work(:,:,:)
+        Real*8 :: one_sixth
         INTEGER :: dims(3), ni, nj, nk
         dims = shape(arrin)
         nk = dims(3)
         nj = dims(2)
         ni = dims(1)
-        !$acc parallel loop present(arrin,arrout) collapse(3)
+        one_sixth = 1.0d0/6.0d0
+        !$acc parallel loop present(arrin,work) collapse(3)
         DO k = 2, nk-1
             DO j = 2, nj-1
                 DO i = 2, ni-1
-                    arrout(i,j,k) = arrin(i,j,k) + &
+                    work(i,j,k) =  &
                             arrin(i-1,j,k) + arrin(i+1,j,k) + &
                             arrin(i,j-1,k) + arrin(i,j+1,k) + & 
                             arrin(i,j,k-1) + arrin(i,j,k+1)
@@ -98,8 +100,18 @@ CONTAINS
             ENDDO
         ENDDO
         !$acc end parallel loop
-    END SUBROUTINE Laplacian
 
+        !$acc parallel loop present(arrin,work) collapse(3)
+        DO k = 2, nk-1
+            DO j = 2, nj-1
+                DO i = 2, ni-1
+                    arrin(i,j,k) = work(i,j,k)*one_sixth
+                ENDDO
+            ENDDO
+        ENDDO
+        !$acc end parallel loop
+
+    END SUBROUTINE Laplacian
 
     SUBROUTINE GHOST_ZONE_COMM(arr)
         IMPLICIT NONE
@@ -111,9 +123,13 @@ CONTAINS
         ni = dims(1)
         nj = dims(2)
         nk = dims(3)
-        ! *Mimic* the communication of ghost zones.
-        ! Rather than invoking MPI here, we simply copy
-        ! The rightmost boundary to the leftmost boundary...
+        ! This is where we would normally communicate boundary
+        ! information.
+        !
+        ! For this example, rather than invoking MPI here, 
+        ! we simply copy the rightmost boundary to the leftmost boundary...
+
+
         DO k = 1, nk
             arr(1,:,k) = arr(ni,:,k)
             arr(:,1,k) = arr(:,nj,k)
@@ -121,7 +137,6 @@ CONTAINS
         arr(:,:,1) = arr(:,:,nk)
 
     END SUBROUTINE GHOST_ZONE_COMM
-
 
     SUBROUTINE grab_args(numx, numy, numz, numiter)
             IMPLICIT NONE
@@ -180,6 +195,7 @@ CONTAINS
         REAL*8 :: kx, ky, kz
         REAL*8, PARAMETER :: pi = 3.1415926535897932384626433832795028841972d0
         INTEGER :: i,j,k, dims(3), ni,nj,nk
+        dims = shape(arr)
         nk = dims(3)
         nj = dims(2)
         ni = dims(1)
@@ -187,7 +203,7 @@ CONTAINS
         kx = orderx*(pi/(ni-1))
         ky = ordery*(pi/(nj-1))
         kz = orderz*(pi/(nk-1))
-        dims = shape(arr)
+
         DO k = 1, nk
             sinkz = sin(kz*k)
             DO j = 1, nj

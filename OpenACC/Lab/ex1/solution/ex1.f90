@@ -46,11 +46,9 @@ PROGRAM MAIN
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
         Write(output_unit,'(a,i5)')' Timestep: ',n
-        IF (MOD(n,2) .eq. 1) Then
-            CALL Laplacian(var,tmp)
-        ELSE
-            CALL Laplacian(tmp,var)
-        ENDIF
+
+        CALL Laplacian(var,tmp)
+
         
     ENDDO
     CALL cpu_time( time= ct_three)
@@ -68,21 +66,22 @@ PROGRAM MAIN
 
     
 CONTAINS
-
-    SUBROUTINE Laplacian(arrin, arrout)
+    SUBROUTINE Laplacian(arrin, work)
         IMPLICIT NONE
-        REAL*8, INTENT(In) :: arrin(:,:,:)
-        REAL*8, INTENT(Out) :: arrout(:,:,:)
+        REAL*8, INTENT(InOut) :: arrin(:,:,:)
+        REAL*8, INTENT(InOut) :: work(:,:,:)
+        Real*8 :: one_sixth
         INTEGER :: dims(3), ni, nj, nk
         dims = shape(arrin)
         nk = dims(3)
         nj = dims(2)
         ni = dims(1)
-        !$acc parallel loop present(arrin,arrout) collapse(3)
+        one_sixth = 1.0d0/6.0d0
+        !$acc parallel loop present(arrin,work) collapse(3)
         DO k = 2, nk-1
             DO j = 2, nj-1
                 DO i = 2, ni-1
-                    arrout(i,j,k) = arrin(i,j,k) + &
+                    work(i,j,k) =  &
                             arrin(i-1,j,k) + arrin(i+1,j,k) + &
                             arrin(i,j-1,k) + arrin(i,j+1,k) + & 
                             arrin(i,j,k-1) + arrin(i,j,k+1)
@@ -90,7 +89,19 @@ CONTAINS
             ENDDO
         ENDDO
         !$acc end parallel loop
+
+        !$acc parallel loop present(arrin,work) collapse(3)
+        DO k = 2, nk-1
+            DO j = 2, nj-1
+                DO i = 2, ni-1
+                    arrin(i,j,k) = work(i,j,k)*one_sixth
+                ENDDO
+            ENDDO
+        ENDDO
+        !$acc end parallel loop
+
     END SUBROUTINE Laplacian
+
 
     SUBROUTINE grab_args(numx, numy, numz, numiter)
             IMPLICIT NONE
@@ -127,16 +138,6 @@ CONTAINS
                                     ' Unrecognized option: '// trim(argname)
                     END SELECT
             ENDDO
-            IF (MOD(nt,2) .eq. 1) THEN
-                WRITE(output_unit,'(a)')' '
-                WRITE(output_unit,'(a)')' //////////////////////////////////////////////////'
-                WRITE(output_unit,'(a)')'  NOTE:  Parameter nt must be even for this example.'
-                WRITE(output_unit,'(a,i0,a,i0,a)')'   Changing nt from ',nt,' to ', nt+1,'.'
-                WRITE(output_unit,'(a)')' //////////////////////////////////////////////////'
-                WRITE(output_unit,'(a)')' '
-                nt = nt+1
-            ENDIF
-
 
     END SUBROUTINE grab_args
 
@@ -157,7 +158,7 @@ CONTAINS
         kx = orderx*(pi/(ni-1))
         ky = ordery*(pi/(nj-1))
         kz = orderz*(pi/(nk-1))
-        dims = shape(arr)
+
         DO k = 1, nk
             sinkz = sin(kz*k)
             DO j = 1, nj

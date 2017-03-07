@@ -36,33 +36,37 @@ PROGRAM MAIN
     var(:,:,:) = 0.0d0
     tmp(:,:,:)   = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
-    !/////////////////////////////////////////////////////
-    ! Evolve the system:
-    ! When running a parallel code, we inevitably need to pull data
-    ! off of the GPU and carry out communication or non-GPU operations.
-    ! The GHOST_ZONE_COMM function below serves as a placeholder
-    ! for this communication and is assumed to be carried out on
-    ! the CPU.  Modify the data movement portions of the code to
-    ! reflect the fact that var should be updated on the CPU prior
-    ! to ghost-zone communication.
+    !////////////////////////////////////////////////////
+    ! In its present state, this GPU-accelerated program runs woefully slow.  
+    !In this exercise, we begin by creating copies
+    ! of var and tmp on the gpu.
+    ! Modify the code as follows:
+    ! 1)  Move the ACC data directives outside the loop
+    ! 2)  Change "data" to "enter data" and "end data" to "exit data"
+    ! 3)  Change 'copy' to 'copyin'
+    ! 4)  Add a similar CopyOUT of var only after the main loop is finished.
+    !      (we don't need to bring tmp back over...)
+    ! 5)  Use 'update host' and 'update device' to within the loop.
+    !     Use these directives to transfer only
+    !     those sections of var needed for the ghost-zone communication
+
+    ! Create an initial copy of var and tmp on the GPU
 
 
-
-
-    !$acc data copy(var, tmp)
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
         Write(output_unit,'(a,i5)')' Timestep: ',n
-
+        !$ACC data copy(var, tmp)
         CALL Laplacian(var,tmp)
-
+        !$ACC end data
         !/////////////////////////////////////
         ! This piece is carried out on the CPU 
         CALL GHOST_ZONE_COMM(var)
         
     ENDDO
+
     CALL cpu_time( time= ct_three)
-    !$acc end data
+    
 
 
 
@@ -137,8 +141,6 @@ CONTAINS
         arr(:,:,1) = arr(:,:,nk)
 
     END SUBROUTINE GHOST_ZONE_COMM
-
-
 
     SUBROUTINE grab_args(numx, numy, numz, numiter)
             IMPLICIT NONE

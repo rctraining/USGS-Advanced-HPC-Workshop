@@ -38,31 +38,41 @@ PROGRAM MAIN
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
     !/////////////////////////////////////////////////////
     ! Evolve the system:
-    ! When running a parallel code, we inevitably need to pull data
-    ! off of the GPU and carry out communication or non-GPU operations.
-    ! The GHOST_ZONE_COMM function below serves as a placeholder
-    ! for this communication and is assumed to be carried out on
-    ! the CPU.  Modify the data movement portions of the code to
-    ! reflect the fact that var should be updated on the CPU prior
-    ! to ghost-zone communication.
 
 
+    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
 
 
-    !$acc data copy(var, tmp)
+    ! Create an initial copy of var and tmp on the GPU
+    !$ACC enter data copyin(var, tmp)
+
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
         Write(output_unit,'(a,i5)')' Timestep: ',n
-
+        ! Copy in the boundaries of arr that were updated
+        !$acc update device(var(:,:,1), var(:,:,nz))
+        !$acc update device(var(1,:,:), var(nx,:,:))
+        !$acc update device(var(:,1,:), var(:,ny,:))
         CALL Laplacian(var,tmp)
+        ! Copy out the values of arr that we need to communicate
+        !$acc update host(var(:,:,2), var(:,:,nz-1))
+        !$acc update host(var(2,:,:), var(nx-1,:,:))
+        !$acc update host(var(:,2,:), var(:,ny-1,:))
 
         !/////////////////////////////////////
         ! This piece is carried out on the CPU 
         CALL GHOST_ZONE_COMM(var)
         
     ENDDO
+    !Write(6,*) ' '
+    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
+    !Write(6,*) ' '
+
     CALL cpu_time( time= ct_three)
-    !$acc end data
+    ! At the end, copy out the entire var array and delete var & tmp on the GPU
+    !$ACC exit data copyout(var) delete(var,tmp)
+
+    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
 
 
 
@@ -113,6 +123,7 @@ CONTAINS
 
     END SUBROUTINE Laplacian
 
+
     SUBROUTINE GHOST_ZONE_COMM(arr)
         IMPLICIT NONE
         REAL*8, INTENT(INOUT) :: arr(:,:,:)
@@ -137,7 +148,6 @@ CONTAINS
         arr(:,:,1) = arr(:,:,nk)
 
     END SUBROUTINE GHOST_ZONE_COMM
-
 
 
     SUBROUTINE grab_args(numx, numy, numz, numiter)
