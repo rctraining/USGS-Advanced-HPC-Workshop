@@ -1,4 +1,4 @@
-SERIAL = serial
+SERIAL = ex1
 FAUX = fparallel
 GPU0 = gpu0
 GPU1 = gpu1
@@ -10,7 +10,7 @@ FC = pgfortran
 FCFLAGS_SERIAL = -fast
 FCFLAGS_GPU = -fast -ta=tesla
 
-serial: serial.f90
+ex1: ex1.f90
 	$(FC) $(FCFLAGS_SERIAL) -o $(SERIAL).$(OUT) $<
 fparallel: fparallel.f90
 	$(FC) $(FCFLAGS_SERIAL) -o $(FAUX).$(OUT) $<
