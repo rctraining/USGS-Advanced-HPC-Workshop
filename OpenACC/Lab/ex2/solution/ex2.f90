@@ -39,23 +39,31 @@ PROGRAM MAIN
     !/////////////////////////////////////////////////////
     ! Evolve the system
 
-    ! We bracket the loop with acc data 
-    ! var and tmp are copied to the GPU
-    !$acc data copy(var, tmp)
+    ! When running a parallel code, we inevitably need to pull data
+    ! off of the GPU and carry out communication or non-GPU operations.
+    ! The update and ghost-zone communication functions below are 
+    ! intended to mimic this situation and should be carried out only
+    ! the CPU.  Modify the data movement portions of the code to
+    ! reflect the fact that var should be updated on the CPU prior
+    ! to the update and ghost-zone communication.
+
+
 
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
         Write(output_unit,'(a,i5)')' Timestep: ',n
-        IF (MOD(n,2) .eq. 1) Then
-            CALL Laplacian(var,tmp)
-        ELSE
-            CALL Laplacian(tmp,var)
-        ENDIF
+        !$acc data copy(var, tmp)
+        CALL Laplacian(var,tmp)
+        !$acc end data
+        !/////////////////////////////////////
+        ! This piece is carried out on the CPU 
+        var = var+tmp
+        CALL GHOST_ZONE_COMM(var)
         
     ENDDO
     CALL cpu_time( time= ct_three)
-    !$acc end data
-    !When end data is encountered, var and tmp are copied back to the CPU
+
+
 
 
     elapsed_time = ct_three-ct_one
@@ -91,6 +99,29 @@ CONTAINS
         ENDDO
         !$acc end parallel loop
     END SUBROUTINE Laplacian
+
+
+    SUBROUTINE GHOST_ZONE_COMM(arr)
+        IMPLICIT NONE
+        REAL*8, INTENT(INOUT) :: arr(:,:,:)
+        INTEGER :: dims(3)
+        INTEGER :: i, j, k
+        INTEGER :: ni, nj, nk
+        dims = shape(arr)
+        ni = dims(1)
+        nj = dims(2)
+        nk = dims(3)
+        ! *Mimic* the communication of ghost zones.
+        ! Rather than invoking MPI here, we simply copy
+        ! The rightmost boundary to the leftmost boundary...
+        DO k = 1, nk
+            arr(1,:,k) = arr(ni,:,k)
+            arr(:,1,k) = arr(:,nj,k)
+        ENDDO
+        arr(:,:,1) = arr(:,:,nk)
+
+    END SUBROUTINE GHOST_ZONE_COMM
+
 
     SUBROUTINE grab_args(numx, numy, numz, numiter)
             IMPLICIT NONE

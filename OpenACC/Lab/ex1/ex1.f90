@@ -139,6 +139,7 @@ CONTAINS
         REAL*8 :: kx, ky, kz
         REAL*8, PARAMETER :: pi = 3.1415926535897932384626433832795028841972d0
         INTEGER :: i,j,k, dims(3), ni,nj,nk
+        dims = shape(arr)
         nk = dims(3)
         nj = dims(2)
         ni = dims(1)
