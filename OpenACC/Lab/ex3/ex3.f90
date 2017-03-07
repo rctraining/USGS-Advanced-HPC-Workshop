@@ -177,15 +177,7 @@ CONTAINS
                                     ' Unrecognized option: '// trim(argname)
                     END SELECT
             ENDDO
-            IF (MOD(nt,2) .eq. 1) THEN
-                WRITE(output_unit,'(a)')' '
-                WRITE(output_unit,'(a)')' //////////////////////////////////////////////////'
-                WRITE(output_unit,'(a)')'  NOTE:  Parameter nt must be even for this example.'
-                WRITE(output_unit,'(a,i0,a,i0,a)')'   Changing nt from ',nt,' to ', nt+1,'.'
-                WRITE(output_unit,'(a)')' //////////////////////////////////////////////////'
-                WRITE(output_unit,'(a)')' '
-                nt = nt+1
-            ENDIF
+
 
 
     END SUBROUTINE grab_args
