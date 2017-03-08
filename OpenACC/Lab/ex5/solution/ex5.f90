@@ -1,11 +1,12 @@
 PROGRAM MAIN
     USE ISO_FORTRAN_ENV, ONLY : output_unit,real64
+    USE OMP_LIB
     IMPLICIT NONE
     REAL*8, ALLOCATABLE :: var(:,:,:), tmp(:,:,:)
     INTEGER ::  nx,ny,nz,nt
     REAL( real64) :: ct_one, ct_two, ct_three
     REAL( real64) :: elapsed_time, loop_time, init_time
-    INTEGER :: i,j,k,n, nq, nkgpu
+    INTEGER :: i,j,k,n, nq, nkgpu, nthread
     CALL cpu_time( time= ct_one)
     !////////////////////////////////////////////////////
     ! Set some default values for the problem parameters.
@@ -21,8 +22,12 @@ PROGRAM MAIN
     CALL grab_args(nx,ny,nz,nt,nq,nkgpu)
 
     ! IF the value of nk_GPU doesn't make sense, set it to nz.
-    IF (nkGPU .lt. 1) nkGPU = nz
+    ! (so the GPU does all of the work)
+    IF (nkGPU .lt. 2) nkGPU = nz
     IF (nkGPU .gt. nz) nkGPU = nz
+    !$OMP PARALLEL
+        nthread = omp_get_num_threads()
+    !$OMP END PARALLEL
 
     WRITE(output_unit,'(a)') ' ///////////////////////////'
     WRITE(output_unit,'(a)') '  3-D Diffusion Equation   '
@@ -33,6 +38,7 @@ PROGRAM MAIN
     WRITE(output_unit,'(a,i0)')'      nt =', nt
     WRITE(output_unit,'(a,i0)')'      nq =', nq
     WRITE(output_unit,'(a,i0)')'   nkgpu =', nkgpu 
+    WRITE(output_unit,'(a,i0)')'   nthrd =', nthread
     WRITE(output_unit,'(a)') ' ///////////////////////////'
     WRITE(output_unit,'(a)') ' '
     !/////////////////////////////////////////////////////
@@ -103,12 +109,14 @@ CONTAINS
         ni = dims(1)
         one_sixth = 1.0d0/6.0d0
 
-        !$acc update device(var(1:nx,1:ny,1), var(1:nx,1:ny,nk_gpu))
+        !////////////////////////////////////////////////////
+        ! GPU portion of the derivative loop
+        !$acc update device(arrin(1:nx,1:ny,1), arrin(1:nx,1:ny,nk_gpu))
         DO k = 2, nk_GPU-1
             queue = MOD(k,numq)+1
 
-            !$acc  update device(var(nx,1:ny,k),var(1,1:ny,k), &
-            !$acc    var(1:nx,1,k), var(1:nx,ny,k)) async(queue)
+            !$acc  update device(arrin(1,1:ny,k),arrin(nx,1:ny,k), &
+            !$acc    arrin(1:nx,1,k), arrin(1:nx,ny,k)) async(queue)
             !$acc parallel loop present(arrin,work) collapse(2) async(queue)
             DO j = 2, nj-1
                 DO i = 2, ni-1
@@ -122,7 +130,10 @@ CONTAINS
         ENDDO
 
         !/////////////////////////////
-        ! CPU portion
+        ! CPU portion of the derivative loop
+        !$OMP PARALLEL SHARED(work,arrin), PRIVATE(i,j,k)
+   
+        !$OMP DO
         DO k = nk_GPU, nk-1
             DO j = 2, nj-1
                 DO i = 2, ni-1
@@ -132,12 +143,20 @@ CONTAINS
                             arrin(i,j,k-1) + arrin(i,j,k+1)
                 ENDDO
             ENDDO
-        ENDDO
 
+        ENDDO
+        !$OMP END DO
+        !$OMP END PARALLEL
+
+
+        !///////////////////////////////////////////////////////
+        ! Before updating arrin, we need to ensure that work has 
+        ! been completely updated.  
 
         !$ACC WAIT
 
-        
+        !///////////////////////////////////////////////////////
+        ! GPU portion of the update loop
         DO k = 2, nk_GPU-1
             queue = MOD(k,numq)+1
             !$acc parallel loop present(arrin,work) collapse(2) async(queue)
@@ -147,13 +166,16 @@ CONTAINS
                 ENDDO
             ENDDO
             !$acc end parallel loop
-            !$acc  update host(var(nx-1,1:ny,k),var(2,1:ny,k), &
-            !$acc    var(1:nx,2,k), var(1:nx,ny-1,k)) async(queue)
+            !$acc  update host(arrin(2,1:ny,k),arrin(nx-1,1:ny,k), &
+            !$acc    arrin(1:nx,2,k), arrin(1:nx,ny-1,k)) async(queue)
         ENDDO
 
         !////////////////////////////////////////////
-        ! CPU Portion
+        ! CPU Portion of the update loop
+        !$OMP PARALLEL SHARED(work,arrin), PRIVATE(i,j,k)
+        !$OMP DO
         DO k = nk_GPU, nk-1
+
             DO j = 2, nj-1
                 DO i = 2, ni-1
                     arrin(i,j,k) = work(i,j,k)*one_sixth
@@ -161,9 +183,13 @@ CONTAINS
             ENDDO
 
         ENDDO
+        !$OMP END DO
+        !$OMP END PARALLEL
 
-
+        !//////////////////////////////////////////////////////////////////////////
+        ! Wait until arrin has been updated on the GPU, then pull back over to CPU
         !$ACC WAIT
+
         !$acc update host(var(1:nx,1:ny,2), var(1:nx,1:ny,nk_GPU-1))
     END SUBROUTINE Laplacian
 
@@ -180,16 +206,18 @@ CONTAINS
         nk = dims(3)
         ! This is where we would normally communicate boundary
         ! information.
-        !
-        ! For this example, rather than invoking MPI here, 
+        ! Rather than invoking MPI for this example, 
         ! we simply copy the rightmost boundary to the leftmost boundary...
 
 
         DO k = 1, nk
-            arr(1,:,k) = arr(ni,:,k)
-            arr(:,1,k) = arr(:,nj,k)
+            arr(1,:,k) = arr(ni-1,:,k)*0
+            arr(:,1,k) = arr(:,nj-1,k)*0
+            arr(ni,:,k) = arr(2,:,k)*0
+            arr(:,nj,k) = arr(:,2,k)*0
         ENDDO
-        arr(:,:,1) = arr(:,:,nk)
+        arr(:,:,1) = arr(:,:,nk-1)*0
+        arr(:,:,nk) = arr(:,:,2)*0
 
     END SUBROUTINE GHOST_ZONE_COMM
 

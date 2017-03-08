@@ -2,8 +2,8 @@ PROG = ex5
 GPU_OUT = gpu
 SERIAL_OUT = serial
 FC = pgfortran
-FCFLAGS_GPU = -acc -fast -ta=tesla -Minfo=accel
-FCFLAGS_SERIAL = -fast
+FCFLAGS_GPU = -acc -fast -ta=tesla -Minfo=accel -mp
+FCFLAGS_SERIAL = -fast -mp
 
 $(PROG): $(PROG).f90
 	$(FC) $(FCFLAGS_GPU) -o $(PROG).$(GPU_OUT) $<
