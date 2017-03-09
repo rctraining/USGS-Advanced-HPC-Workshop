@@ -17,6 +17,8 @@ PROGRAM MAIN
     !////////////////////////////////////////////////////
     ! Check to see if the user has specified anything 
     ! different at the command line.
+    ! Command line calling syntax:
+    ! ./ex5.gpu -nx 256 -ny 256 -nz 256 -nt 100
     CALL grab_args(nx,ny,nz,nt)
 
     WRITE(output_unit,'(a)') ' ///////////////////////////'
@@ -52,10 +54,18 @@ PROGRAM MAIN
 
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
-        Write(output_unit,'(a,i5)')' Timestep: ',n
+
+        IF (MOD(n,10) .eq. 0) Write(output_unit,'(a,i5)')' Timestep: ',n
+
+        ! Because we need to communicate our ghost zones, our initial
+        ! attempt at the program might be to copy var and tmp onto and
+        ! and off of the GPU during each timestep.
+        !
+        ! This turns out to be very slow!
         !$acc data copy(var, tmp)
         CALL Laplacian(var,tmp)
         !$acc end data
+
         !/////////////////////////////////////
         ! This piece is carried out on the CPU 
         CALL GHOST_ZONE_COMM(var)
@@ -64,7 +74,7 @@ PROGRAM MAIN
     CALL cpu_time( time= ct_three)
 
 
-
+    Write(output_unit,*) var(8,8,8), var(nx-8,ny-8,nz-8)
 
     elapsed_time = ct_three-ct_one
     init_time = ct_two-ct_one
@@ -125,16 +135,18 @@ CONTAINS
         nk = dims(3)
         ! This is where we would normally communicate boundary
         ! information.
-        !
-        ! For this example, rather than invoking MPI here, 
+        ! Rather than invoking MPI for this example, 
         ! we simply copy the rightmost boundary to the leftmost boundary...
 
 
-        DO k = 1, nk
-            arr(1,:,k) = arr(ni,:,k)
-            arr(:,1,k) = arr(:,nj,k)
+        DO k = 2, nk-1
+            arr(1,:,k) = arr(ni-1,:,k)*0
+            arr(:,1,k) = arr(:,nj-1,k)*0
+            arr(ni,:,k) = arr(2,:,k)*0
+            arr(:,nj,k) = arr(:,2,k)*0
         ENDDO
-        arr(:,:,1) = arr(:,:,nk)
+        arr(:,:,1) = arr(:,:,nk-1)*0
+        arr(:,:,nk) = arr(:,:,2)*0
 
     END SUBROUTINE GHOST_ZONE_COMM
 
@@ -196,11 +208,11 @@ CONTAINS
         kz = orderz*(pi/(nk-1))
 
         DO k = 1, nk
-            sinkz = sin(kz*k)
+            sinkz = sin(kz*(k-1))
             DO j = 1, nj
-                sinky = sin(ky*j)
+                sinky = sin(ky*(j-1))
                 DO i = 1, ni
-                    sinkx = sin(kx*i)
+                    sinkx = sin(kx*(i-1))
                     arr(i,j,k) = arr(i,j,k)+amp*sinkx*sinky*sinkz
                 ENDDO
             ENDDO

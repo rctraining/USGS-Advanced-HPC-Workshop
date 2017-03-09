@@ -17,6 +17,8 @@ PROGRAM MAIN
     !////////////////////////////////////////////////////
     ! Check to see if the user has specified anything 
     ! different at the command line.
+    ! Command line calling syntax:
+    ! ./ex5.gpu -nx 256 -ny 256 -nz 256 -nt 100
     CALL grab_args(nx,ny,nz,nt)
 
     WRITE(output_unit,'(a)') ' ///////////////////////////'
@@ -36,25 +38,25 @@ PROGRAM MAIN
     var(:,:,:) = 0.0d0
     tmp(:,:,:)   = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
-    !/////////////////////////////////////////////////////
-    ! Evolve the system:
 
 
-    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
 
 
     ! Create an initial copy of var and tmp on the GPU
     !$ACC enter data copyin(var, tmp)
 
+    !/////////////////////////////////////////////////////
+    ! Evolve the system:
+
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
-        Write(output_unit,'(a,i5)')' Timestep: ',n
-        ! Copy in the boundaries of arr that were updated
+        IF (MOD(n,10) .eq. 0) Write(output_unit,'(a,i5)')' Timestep: ',n
+        ! Copy in the boundaries of var that were updated
         !$acc update device(var(:,:,1), var(:,:,nz))
         !$acc update device(var(1,:,:), var(nx,:,:))
         !$acc update device(var(:,1,:), var(:,ny,:))
         CALL Laplacian(var,tmp)
-        ! Copy out the values of arr that we need to communicate
+        ! Copy out the values of var that we need to communicate
         !$acc update host(var(:,:,2), var(:,:,nz-1))
         !$acc update host(var(2,:,:), var(nx-1,:,:))
         !$acc update host(var(:,2,:), var(:,ny-1,:))
@@ -64,16 +66,14 @@ PROGRAM MAIN
         CALL GHOST_ZONE_COMM(var)
         
     ENDDO
-    !Write(6,*) ' '
-    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
-    !Write(6,*) ' '
+
 
     CALL cpu_time( time= ct_three)
     ! At the end, copy out the entire var array and delete var & tmp on the GPU
     !$ACC exit data copyout(var) delete(var,tmp)
 
-    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
 
+    Write(output_unit,*) var(8,8,8), var(nx-8,ny-8,nz-8)
 
 
     elapsed_time = ct_three-ct_one
@@ -123,33 +123,6 @@ CONTAINS
 
     END SUBROUTINE Laplacian
 
-
-    SUBROUTINE GHOST_ZONE_COMM(arr)
-        IMPLICIT NONE
-        REAL*8, INTENT(INOUT) :: arr(:,:,:)
-        INTEGER :: dims(3)
-        INTEGER :: i, j, k
-        INTEGER :: ni, nj, nk
-        dims = shape(arr)
-        ni = dims(1)
-        nj = dims(2)
-        nk = dims(3)
-        ! This is where we would normally communicate boundary
-        ! information.
-        !
-        ! For this example, rather than invoking MPI here, 
-        ! we simply copy the rightmost boundary to the leftmost boundary...
-
-
-        DO k = 1, nk
-            arr(1,:,k) = arr(ni,:,k)
-            arr(:,1,k) = arr(:,nj,k)
-        ENDDO
-        arr(:,:,1) = arr(:,:,nk)
-
-    END SUBROUTINE GHOST_ZONE_COMM
-
-
     SUBROUTINE grab_args(numx, numy, numz, numiter)
             IMPLICIT NONE
 
@@ -190,6 +163,33 @@ CONTAINS
 
     END SUBROUTINE grab_args
 
+    SUBROUTINE GHOST_ZONE_COMM(arr)
+        IMPLICIT NONE
+        REAL*8, INTENT(INOUT) :: arr(:,:,:)
+        INTEGER :: dims(3)
+        INTEGER :: i, j, k
+        INTEGER :: ni, nj, nk
+        dims = shape(arr)
+        ni = dims(1)
+        nj = dims(2)
+        nk = dims(3)
+        ! This is where we would normally communicate boundary
+        ! information.
+        ! Rather than invoking MPI for this example, 
+        ! we simply copy the rightmost boundary to the leftmost boundary...
+
+
+        DO k = 2, nk-1
+            arr(1,:,k) = arr(ni-1,:,k)*0
+            arr(:,1,k) = arr(:,nj-1,k)*0
+            arr(ni,:,k) = arr(2,:,k)*0
+            arr(:,nj,k) = arr(:,2,k)*0
+        ENDDO
+        arr(:,:,1) = arr(:,:,nk-1)*0
+        arr(:,:,nk) = arr(:,:,2)*0
+
+    END SUBROUTINE GHOST_ZONE_COMM
+
     SUBROUTINE INIT_ARR(arr, amp, orderx, ordery, orderz)
         IMPLICIT NONE
         REAL*8, INTENT(INOUT) :: arr(:,:,:)
@@ -209,15 +209,16 @@ CONTAINS
         kz = orderz*(pi/(nk-1))
 
         DO k = 1, nk
-            sinkz = sin(kz*k)
+            sinkz = sin(kz*(k-1))
             DO j = 1, nj
-                sinky = sin(ky*j)
+                sinky = sin(ky*(j-1))
                 DO i = 1, ni
-                    sinkx = sin(kx*i)
+                    sinkx = sin(kx*(i-1))
                     arr(i,j,k) = arr(i,j,k)+amp*sinkx*sinky*sinkz
                 ENDDO
             ENDDO
         ENDDO
     END SUBROUTINE INIT_ARR
+
 
 END PROGRAM MAIN

@@ -16,15 +16,19 @@ PROGRAM MAIN
     nt = 100   ! number of time steps to integrate over
     nq = 4     ! The number of OpenACC queues to employ
     nkgpu = nz ! GPU handles z-levels from 2 through nkgpu-1
+               ! See Laplacian subroutine for further details
     !////////////////////////////////////////////////////
-    ! Check to see if the user has specified anything 
-    ! different at the command line.
+    ! Check to see if the user has overridden
+    ! these defaults at the command line.
+    ! Command line calling syntax:
+    ! ./ex5.gpu -nx 256 -ny 256 -nz 256 -nt 100 -nq 4 -nkgpu 256
     CALL grab_args(nx,ny,nz,nt,nq,nkgpu)
 
     ! IF the value of nk_GPU doesn't make sense, set it to nz.
-    ! (so the GPU does all of the work)
+    ! (i.e., GPU handles entire calculation)
     IF (nkGPU .lt. 2) nkGPU = nz
     IF (nkGPU .gt. nz) nkGPU = nz
+
     !$OMP PARALLEL
         nthread = omp_get_num_threads()
     !$OMP END PARALLEL
@@ -49,17 +53,12 @@ PROGRAM MAIN
     var(:,:,:) = 0.0d0
     tmp(:,:,:)   = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
-    !/////////////////////////////////////////////////////
-    ! Evolve the system:
 
-
-    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
-
-    Write(6,*) var(nx/4-2:nx/4+2,ny/4,5)
-    Write(6,*) var(nx/4-2:nx/4+2,ny/4,nz-5)
     ! Create an initial copy of var and tmp on the GPU
     !$ACC enter data copyin(var, tmp)
 
+    !/////////////////////////////////////////////////////
+    ! Evolve the system:
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
         IF (MOD(n,10) .eq. 0) Write(output_unit,'(a,i5)')' Timestep: ',n
@@ -72,23 +71,23 @@ PROGRAM MAIN
         CALL GHOST_ZONE_COMM(var)
         
     ENDDO
-    !Write(6,*) ' '
-    !Write(6,*) var(nx/4-10:nx/4+10,ny/4,nz/4)
-    !Write(6,*) ' '
 
     CALL cpu_time( time= ct_three)
-    ! At the end, copy out the GPU portion of the var array and delete var & tmp on the GPU
+    ! At the end, copy out the GPU portion of the var array, 
+    ! and delete var & tmp on the GPU.
     !$ACC update host(var(1:nx,1:ny,2:nkGPU-1))
     !$ACC exit data delete(var,tmp)
+    Write(output_unit,*)var(8,8,8), var(nx-8,ny-8,nz-8)
+    
 
-    Write(6,*) var(nx/4-2:nx/4+2,ny/4,5)
-    Write(6,*) var(nx/4-2:nx/4+2,ny/4,nz-5)
 
 
     elapsed_time = ct_three-ct_one
     init_time = ct_two-ct_one
     loop_time = ct_three-ct_two
+
     WRITE(output_unit,'(a)')' Complete!'
+
     WRITE(output_unit,'( a, ES14.4, a)')'         Elapsed time: ', elapsed_time, ' seconds.'
     WRITE(output_unit, fmt= '( a, ES14.4, a)') '  Initialization time: ', init_time, ' seconds.'
     WRITE(output_unit, fmt= '( a, ES14.4, a)') '            Loop time: ', loop_time, ' seconds.'
@@ -108,6 +107,20 @@ CONTAINS
         nj = dims(2)
         ni = dims(1)
         one_sixth = 1.0d0/6.0d0
+
+        !/////////////////////////////////////////////////////
+        ! The general idea here is to split the derivative loop
+        ! and the update loop into a CPU piece and a GPU piece.
+        ! By exploiting async and wait directives, we can have
+        ! both the CPU and the GPU perform useful work.
+        ! GPU:  handles z-levels k = 2 through k = nk_gpu-1
+        ! CPU:  handles z-levels k = nk_gpu through nk-1
+        ! In this solution, we add OpenMP directives to the CPU level
+        ! (we have added a -mp flag to our Makefile to enable OpenMP).
+
+
+        !******************************************************
+        !*   PART 1:  DERIVATIVE LOOP
 
         !////////////////////////////////////////////////////
         ! GPU portion of the derivative loop
@@ -151,9 +164,12 @@ CONTAINS
 
         !///////////////////////////////////////////////////////
         ! Before updating arrin, we need to ensure that work has 
-        ! been completely updated.  
+        ! been completely updated.  CPU and GPU halt at $acc Wait
 
-        !$ACC WAIT
+        !$acc WAIT
+
+        !******************************************************
+        !*   PART 2:  UPDATE LOOP
 
         !///////////////////////////////////////////////////////
         ! GPU portion of the update loop
@@ -187,10 +203,10 @@ CONTAINS
         !$OMP END PARALLEL
 
         !//////////////////////////////////////////////////////////////////////////
-        ! Wait until arrin has been updated on the GPU, then pull back over to CPU
-        !$ACC WAIT
-
+        ! Wait until the GPU finishes calculating arrin, then transfer back to CPU
+        !$acc WAIT
         !$acc update host(var(1:nx,1:ny,2), var(1:nx,1:ny,nk_GPU-1))
+
     END SUBROUTINE Laplacian
 
 
@@ -210,7 +226,7 @@ CONTAINS
         ! we simply copy the rightmost boundary to the leftmost boundary...
 
 
-        DO k = 1, nk
+        DO k = 2, nk-1
             arr(1,:,k) = arr(ni-1,:,k)*0
             arr(:,1,k) = arr(:,nj-1,k)*0
             arr(ni,:,k) = arr(2,:,k)*0
@@ -286,15 +302,14 @@ CONTAINS
         kz = orderz*(pi/(nk-1))
 
         DO k = 1, nk
-            sinkz = sin(kz*k)
+            sinkz = sin(kz*(k-1))
             DO j = 1, nj
-                sinky = sin(ky*j)
+                sinky = sin(ky*(j-1))
                 DO i = 1, ni
-                    sinkx = sin(kx*i)
+                    sinkx = sin(kx*(i-1))
                     arr(i,j,k) = arr(i,j,k)+amp*sinkx*sinky*sinkz
                 ENDDO
             ENDDO
         ENDDO
     END SUBROUTINE INIT_ARR
-
 END PROGRAM MAIN

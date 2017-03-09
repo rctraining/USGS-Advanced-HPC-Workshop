@@ -17,6 +17,8 @@ PROGRAM MAIN
     !////////////////////////////////////////////////////
     ! Check to see if the user has specified anything 
     ! different at the command line.
+    ! Command line calling syntax:
+    ! ./ex5.gpu -nx 256 -ny 256 -nz 256 -nt 100
     CALL grab_args(nx,ny,nz,nt)
 
     WRITE(output_unit,'(a)') ' ///////////////////////////'
@@ -34,28 +36,25 @@ PROGRAM MAIN
     ALLOCATE(tmp(1:nx,1:ny,1:nz))
     
     var(:,:,:) = 0.0d0
-    tmp(:,:,:)   = 0.0d0
+    tmp(:,:,:) = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! single sine wave in each dimension
     !/////////////////////////////////////////////////////
     ! Evolve the system
 
-    ! We bracket the loop with acc data 
-    ! var and tmp are copied to the GPU
+    ! We bracket the main loop with an acc data directive 
+    ! and create copies of var and tmp onthe GPU
     !$acc data copy(var, tmp)
 
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
-        Write(output_unit,'(a,i5)')' Timestep: ',n
-
-        CALL Laplacian(var,tmp)
-
-        
+        IF (MOD(n,10) .eq. 0) Write(output_unit,'(a,i5)')' Timestep: ',n
+        CALL Laplacian(var,tmp)    
     ENDDO
     CALL cpu_time( time= ct_three)
     !$acc end data
     !When end data is encountered, var and tmp are copied back to the CPU
 
-
+    Write(output_unit,*) var(8,8,8), var(nx-8,ny-8,nz-8)
     elapsed_time = ct_three-ct_one
     init_time = ct_two-ct_one
     loop_time = ct_three-ct_two
@@ -77,6 +76,15 @@ CONTAINS
         nj = dims(2)
         ni = dims(1)
         one_sixth = 1.0d0/6.0d0
+
+        !//////////////////////////////////////////////////////
+        !  The initial solution is relatively straightforward.
+        !  1) We add an acc parallel loop directive around each loop
+        !  2) We pass the compiler a hint that arrin and work are 
+        !     already on the GPU.  (Passed earlier as var and tmp)
+        !  3) We use the collapse(3) clause to indicate that we have three
+        !     tightly-nested loops.  
+
         !$acc parallel loop present(arrin,work) collapse(3)
         DO k = 2, nk-1
             DO j = 2, nj-1
@@ -160,11 +168,11 @@ CONTAINS
         kz = orderz*(pi/(nk-1))
 
         DO k = 1, nk
-            sinkz = sin(kz*k)
+            sinkz = sin(kz*(k-1))
             DO j = 1, nj
-                sinky = sin(ky*j)
+                sinky = sin(ky*(j-1))
                 DO i = 1, ni
-                    sinkx = sin(kx*i)
+                    sinkx = sin(kx*(i-1))
                     arr(i,j,k) = arr(i,j,k)+amp*sinkx*sinky*sinkz
                 ENDDO
             ENDDO
