@@ -1,4 +1,7 @@
 .DS_STORE
 *.mod
 *.out
+*.dbg
+*.gpu
+*.serial
 *.o

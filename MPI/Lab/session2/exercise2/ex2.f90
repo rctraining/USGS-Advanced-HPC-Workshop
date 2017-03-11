@@ -6,14 +6,17 @@ PROGRAM MAIN
     INTEGER ::  nx,nt
     REAL( real64) :: ct_one, ct_two, ct_three
     REAL( real64) :: elapsed_time, loop_time, init_time
-    INTEGER :: i,j,k,n
+    INTEGER :: i,j,k,n, ierr
 
     !/////////////////////////////////////////
     ! These two variables are initialized in INIT_COMM below.
     INTEGER :: my_rank, ncpu  ! Rank of this process; total number of MPI processes
     INTEGER :: my_imin, my_imax ! the range of x-indices that this rank owns
+    INTEGER :: my_numx  ! The number of-indices assinged to this processes
+                         ! my_numx = my_imax-my_imin+1
 
     CALL cpu_time( time= ct_one)
+
     !////////////////////////////////////////////////////
     ! Set some default values for the problem parameters.
     nx = 4096   ! x-dimension of our 3-D array
@@ -42,15 +45,21 @@ PROGRAM MAIN
     !/////////////////////////////////////////////////////
     ! Initialize var and the work array
 
-
-    my_numx = nx/ncpu       ! The number of x-values local to this rank
-    modcheck = MOD(nx,ncpu) ! If nx doesn't divide evenly into ncpu, we have a bit more work to do
-    IF (my_rank .lt. modcheck) my_numx = my_numx+1
-
-    !NOTE: my_imin is correct only for ncpu = 1
+    !NOTE: my_imin & my_numx are correct only for ncpu = 1
     !      It should be modified based on my_rank.
+    my_numx = nx
     my_imin = 1
     my_imax = my_imin+my_numx-1
+
+    DO i = 0, ncpu-1
+        IF (i .eq. my_rank) THEN
+            WRITE(6,*)'my_rank, my_imin, my_imax: ', my_rank, my_imin, my_imax
+        ENDIF
+        ! The use of a barrier here helps the line above to be printed out
+        ! "in order"
+        IF (ncpu .gt. 1) CALL MPI_BARRIER(MPI_COMM_WORLD,ierr)
+    ENDDO
+
     
     ALLOCATE(var(my_imin-1:my_imax+1))  ! We allow space for two
     ALLOCATE(tmp(my_imin:my_imax))  ! "ghost zones" in the var array
@@ -75,13 +84,13 @@ PROGRAM MAIN
 
         CALL Laplacian(var,tmp)
 
-
-
     ENDDO
+    ! We may want to write out the values for debugging
+    !Write(output_unit,*) var(:)   
 
     !//////////////////////////////////////////
     ! Write out some timing information.
-    !Write(output_unit,*) var(:)  !, var(nx-8)
+
 
     CALL cpu_time( time= ct_three)
     elapsed_time = ct_three-ct_one
@@ -93,7 +102,12 @@ PROGRAM MAIN
         WRITE(output_unit, fmt= '( a, ES14.4, a)') '  Initialization time: ', init_time, ' seconds.'
         WRITE(output_unit, fmt= '( a, ES14.4, a)') '            Loop time: ', loop_time, ' seconds.'
     ENDIF
-    
+
+    ! Always call this at the end of the program so that all ranks exit together.
+    ! Once your code is working, try removing this call.  The code will still work,
+    ! but sometimes you may not see the timing information printed out because other
+    ! ranks exit before rank 0 can write.
+    CALL MPI_FINALIZE(ierr)
 CONTAINS
 
     SUBROUTINE GHOST_ZONE_COMM()
@@ -105,8 +119,8 @@ CONTAINS
 
     SUBROUTINE Laplacian(arrin, work)
         IMPLICIT NONE
-        REAL*8, INTENT(InOut) :: arrin(:)
-        REAL*8, INTENT(InOut) :: work(:)
+        REAL*8, INTENT(InOut) :: arrin(my_imin-1:)
+        REAL*8, INTENT(InOut) :: work(my_imin:)
         INTEGER :: ni, imin,imax
 
         ni = size(arrin)
