@@ -1,9 +1,7 @@
 !///////////////////////////////////////
-! Exercise:  The following code is nearly identical to the row_read example.  Now, however,
-! only process zero reads from the main_input file.   
-!
-! Modify this code so that processes 0 broadcasts to all other processes in column 0
-! before the broadcast along process rows is carried out.
+! Exercise:  MODIFY the function row_col_max as follows:
+!            1) reduce across rows to find the row max
+!            2) reduce across columns to find the column max (and thus the global max)
 !
 ! Calling syntax:  mpiexec -ncpu ./ex1.out -nprow X -npcol Y
 ! WHERE X*Y = ncpu
@@ -14,7 +12,7 @@ PROGRAM MAIN
     IMPLICIT NONE
     INTEGER :: my_rank, ncpu ! global rank and number of MPI processes
     INTEGER :: my_row_rank, my_col_rank ! The rank within a row and column for each process respectively
-    INTEGER :: nprow=1, npcol=1 ! Number of process rows and columns respectively
+    INTEGER :: nprow=2, npcol=2 ! Number of process rows and columns respectively
                              ! 0 <= my_row_rank <= npcol
                              ! 0 <= my_col_rank <= nprow
     
@@ -22,25 +20,30 @@ PROGRAM MAIN
     INTEGER :: col_comm, row_comm ! subcommunicators for rows and columns
                                    ! row_comm connects all processes in the same row
                                    ! col_comm connects all processes in the same column
-    REAL*8 :: input_data = 0.0d0
-    Namelist /Input_Namelist/ input_data
+    CHARACTER*120 :: msg
+    REAL*8 :: wave_amp= 1.0d0  ! Amplitude of the sine wave we initialize (read from main_input) 
+    Namelist /Input_Namelist/ wave_amp
 
     ! We have some additional data related to our distributed array
-    INTEGER, PARAMETER :: nx_local = 128, ny_local = 128
+    INTEGER, PARAMETER :: nx_local = 32, ny_local = 32
     INTEGER :: nx_global, ny_global  ! = nx_local*nprow;  = ny_local*npcol
     REAL*8  :: var(nx_local,ny_local)  
-    REAL*8  :: local_max = 0.0d0
-
-
+    REAL*8  :: local_max = 0.0d0, global_max = 0.0d0
 
 
     !/////////////////////// Initialization
     CALL GRAB_ARGS()
     CALL INIT_COMM()
-    var = 0
-    CALL INIT_ARR(var, 1.0d0, 2, 2) ! single sine hump in each direction
+    CALL READ_INPUT_DATA() ! rank 0 reads input and broadcasts
+
+    nx_global = nx_local*nprow
+    ny_global = ny_local*nprow
+    var(:,:) = 0
+
+    CALL INIT_ARR(var, wave_amp, 2, 2) ! single sine hump in each direction
     local_max = maxval(var)
-    WRITE(6,*)'local_max', local_max
+    global_max = local_max
+
     !/////////////////////////////////////////////////////////////////
     !  Report on the process parameters
     IF (my_rank .eq. 0) THEN
@@ -54,76 +57,74 @@ PROGRAM MAIN
         WRITE(output_unit,'(a)') ' '
         WRITE(output_unit,'(a)') ' Proccess Grid Layout: '
     ENDIF
-    DO j = 0, nprow-1    ! Loop over each row
-        DO i = 0, npcol-1 ! Loop over each column
-            IF ((my_row_rank .eq. i) .and. (my_col_rank .eq. j) ) THEN
-                WRITE(output_unit,'(a,i0,a,i0,a,i0)') &
-                    ' row = ', my_col_rank, ' column = ', my_row_rank, ' rank = ', my_rank
-            ENDIF
-            CALL MPI_BARRIER(MPI_COMM_WORLD,ierr)
-        ENDDO
-    ENDDO
 
-    !////////////////////////////////////////////
-    !  READ INPUT and Broadcast
-    IF (my_rank .eq. 0) THEN
-        ! First process in each row reads the input file
-        CALL READ_INPUT_DATA()
-    ENDIF
+    WRITE(msg,'(a,i0,a,i0,a,i0)') &
+        ' row = ', my_col_rank, ' column = ', my_row_rank, ' rank = ', my_rank
+    CALL ORDERED_PRINT(msg)
 
     IF (my_rank .eq. 0) THEN
         WRITE(output_unit,*)' '
-        WRITE(output_unit,*)'Input_data prior to broadcast...'
+        WRITE(output_unit,*)'Max values prior to row_col_max...'
     ENDIF
+    WRITE(msg,'(a,i0,a,i0,a,ES12.4,a,ES12.4)') &
+        ' row = ', my_col_rank, ' column = ', my_row_rank, &
+        ' local max = ', local_max, ' global max = ', global_max
+    CALL ORDERED_PRINT(msg)
 
-    DO j = 0, nprow-1    ! Loop over each row
-        DO i = 0, npcol-1 ! Loop over each column
-            IF ((my_row_rank .eq. i) .and. (my_col_rank .eq. j) ) THEN
-                WRITE(output_unit,'(a,i0,a,i0,a,F8.4)') &
-                    ' row = ', my_col_rank, ' column = ', my_row_rank, ' input_data = ', input_data
-            ENDIF
-            CALL MPI_BARRIER(MPI_COMM_WORLD,ierr)
-        ENDDO
-    ENDDO
-
-
-
-    ! The value of input_data stored rank 0 of row_comm is broadcast
-    ! to all other processes within the communicator.
-    ! We could alternatively broadcast from rank 3, say, by changing the 0 to a 3 below...
-    CALL MPI_Bcast( input_data, 1, MPI_DOUBLE_PRECISION, 0,row_comm,ierr) 
+    CALL ROW_COL_MAX()
 
     IF (my_rank .eq. 0) THEN
         WRITE(output_unit,*)' '
-        WRITE(output_unit,*)'Input_data following broadcast...'
+        WRITE(output_unit,*)'Max values following to row_col_max...'
     ENDIF
 
+    WRITE(msg,'(a,i0,a,i0,a,ES12.4,a,ES12.4)') &
+        ' row = ', my_col_rank, ' column = ', my_row_rank, &
+        ' local max = ', local_max, ' global max = ', global_max
+    CALL ORDERED_PRINT(msg)
 
-
-    DO j = 0, nprow-1    ! Loop over each row
-        DO i = 0, npcol-1 ! Loop over each column
-            IF ((my_row_rank .eq. i) .and. (my_col_rank .eq. j) ) THEN
-                WRITE(output_unit,'(a,i0,a,i0,a,F8.4)') &
-                    ' row = ', my_col_rank, ' column = ', my_row_rank, ' input_data = ', input_data
-            ENDIF
-            CALL MPI_BARRIER(MPI_COMM_WORLD,ierr)
-        ENDDO
-    ENDDO
 
     CALL MPI_FINALIZE(ierr)
 
 CONTAINS
+
+    SUBROUTINE ROW_COL_MAX()
+        IMPLICIT NONE
+        INTEGER :: ierr
+        REAL*8 :: tmp
+        global_max = local_max
+    END SUBROUTINE ROW_COL_MAX
+
+    SUBROUTINE ORDERED_PRINT(message)
+        IMPLICIT NONE
+        CHARACTER(*), INTENT(IN) :: message
+        DO j = 0, nprow-1    ! Loop over each row
+            DO i = 0, npcol-1 ! Loop over each column
+                IF ((my_row_rank .eq. i) .and. (my_col_rank .eq. j) ) THEN
+                    WRITE(output_unit,*) TRIM(msg)
+                ENDIF
+                CALL MPI_BARRIER(MPI_COMM_WORLD,ierr)
+            ENDDO
+        ENDDO
+    END SUBROUTINE ORDERED_PRINT
 
     SUBROUTINE READ_INPUT_DATA()
         IMPLICIT NONE
         Character*120 :: input_file
         input_file = 'main_input'
 
-		! First read the main input file
-		OPEN(unit=20, file=input_file, status="old", position="rewind")
-		READ(unit=20, nml=input_namelist)
-		CLOSE(20)
+		! Rank 0 reads from input
+        IF (my_rank .eq. 0) THEN
+		    OPEN(unit=20, file=input_file, status="old", position="rewind")
+		    READ(unit=20, nml=input_namelist)
+		    CLOSE(20)
+        ENDIF
 
+        ! Broadcast across column 0 and then across rows
+        IF (my_row_rank .eq. 0) THEN
+            CALL MPI_Bcast( wave_amp, 1, MPI_DOUBLE_PRECISION, 0,col_comm,ierr)
+        ENDIF
+        CALL MPI_Bcast( wave_amp, 1, MPI_DOUBLE_PRECISION, 0,row_comm,ierr) 
     END SUBROUTINE READ_INPUT_DATA
 
     SUBROUTINE INIT_COMM()
@@ -176,8 +177,6 @@ CONTAINS
             CHARACTER(len=1024) :: argname  ! Argument key
             CHARACTER(len=1024) :: val      ! Argument value
 
-
-
             n = command_argument_count()
             DO i=1,n,2
                     CALL get_command_argument(i, argname)
@@ -204,7 +203,7 @@ CONTAINS
         REAL*8 :: sinkx, sinky
         REAL*8 :: kx, ky
         REAL*8, PARAMETER :: pi = 3.1415926535897932384626433832795028841972d0
-        INTEGER :: i,j,k, dims(2), ni,nj,nk
+        INTEGER :: i,j,k, dims(2), ni,nj
         INTEGER :: iglobal, jglobal
         dims = shape(arr)
         nj = dims(2)
@@ -212,7 +211,6 @@ CONTAINS
 
         kx = orderx*(pi/(nx_global-1))
         ky = ordery*(pi/(ny_global-1))
-
         
         DO j = 1, nj
             jglobal = my_col_rank*ny_local+j
