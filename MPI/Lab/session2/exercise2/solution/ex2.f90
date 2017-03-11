@@ -1,3 +1,6 @@
+!////////////////////////////////////////////////////////////////////////////////////////
+!  This program solves the 1-D heat equation, with zero-temperature 
+!  boundary conditions, in parallel.   
 PROGRAM MAIN
     USE ISO_FORTRAN_ENV, ONLY : output_unit,real64
     USE MPI

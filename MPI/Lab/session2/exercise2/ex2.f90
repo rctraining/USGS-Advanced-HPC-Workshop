@@ -1,3 +1,10 @@
+!////////////////////////////////////////////////////////////////////////////////////////
+!  This program solves the 1-D heat equation, with zero-temperature 
+!  boundary conditions, in serial.   
+!  EXERCISE:  Parallelize this code by
+!             1)  Adjusting the logic used to initialize my_imin and my_imax
+!             2)  Filling in the ghost_zone_comm routine that communicates
+!                 boundary values between neighbors.
 PROGRAM MAIN
     USE ISO_FORTRAN_ENV, ONLY : output_unit,real64
     USE MPI

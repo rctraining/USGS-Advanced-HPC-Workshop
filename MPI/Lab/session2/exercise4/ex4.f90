@@ -1,8 +1,12 @@
+!////////////////////////////////////////////////////////////////////////////////////////
+!  This program solves the 1-D heat equation, with zero-temperature 
+!  boundary conditions, in parallel.   
+!  EXERCISE:  Rewrite the ghost_zone_comm routine to use non-blocking sends and receives
 PROGRAM MAIN
     USE ISO_FORTRAN_ENV, ONLY : output_unit,real64
     USE MPI
     IMPLICIT NONE
-    REAL*8, ALLOCATABLE :: var(:), tmp(:)
+    REAL*8, ALLOCATABLE :: var(:), wrk(:)
     INTEGER ::  nx,nt
     REAL( real64) :: ct_one, ct_two, ct_three
     REAL( real64) :: elapsed_time, loop_time, init_time
@@ -41,7 +45,7 @@ PROGRAM MAIN
         WRITE(output_unit,'(a)') ' '
     ENDIF
     !/////////////////////////////////////////////////////
-    ! Initialize var and the work array
+    ! Initialize var and the wrk array
 
     !NOTE: my_imin and my_imax should be modified based on my_rank!
     my_numx = nx/ncpu       ! The number of x-values local to this rank
@@ -63,10 +67,10 @@ PROGRAM MAIN
     ENDDO
     
     ALLOCATE(var(my_imin-1:my_imax+1))
-    ALLOCATE(tmp(my_imin:my_imax))
+    ALLOCATE(wrk(my_imin:my_imax))
     
     var(:)   = 0.0d0
-    tmp(:)   = 0.0d0
+    wrk(:)   = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2) ! single sine wave in x-direction
 
 
@@ -74,6 +78,7 @@ PROGRAM MAIN
     ! Evolve the system
     CALL cpu_time( time= ct_two)
     DO n = 1, nt
+
         IF (my_rank .eq. 0) THEN
             IF (MOD(n,100) .eq. 0) Write(output_unit,'(a,i5)')' Timestep: ',n
         ENDIF
@@ -82,8 +87,7 @@ PROGRAM MAIN
         !  to left and right neighbor ranks.
         IF (ncpu .gt. 1) CALL GHOST_ZONE_COMM()
 
-        CALL Laplacian(var,tmp)
-
+        CALL Laplacian()
 
 
     ENDDO
@@ -102,15 +106,15 @@ PROGRAM MAIN
         WRITE(output_unit, fmt= '( a, ES14.4, a)') '  Initialization time: ', init_time, ' seconds.'
         WRITE(output_unit, fmt= '( a, ES14.4, a)') '            Loop time: ', loop_time, ' seconds.'
     ENDIF
-    
+    CALL MPI_FINALIZE(ierr)
 CONTAINS
 
     SUBROUTINE GHOST_ZONE_COMM()
         IMPLICIT NONE
-        INTEGER :: ierr, dest, source, tag
+        INTEGER :: ierr, dest, source
+        INTEGER :: rbtag=1, lbtag=2 ! MPI tags for the right/left boundary communication
         REAL*8  :: lbval, rbval ! left and right boundary values
-        INTEGER :: irqs(4)
-        INTEGER :: mstat(MPI_STATUS_SIZE, 4)
+        REAL*8  :: rtval, ltval ! buffer variables for receiving boundary values
         rbval = var(my_imax) 
         lbval = var(my_imin)
 
@@ -120,16 +124,15 @@ CONTAINS
         IF (my_rank .gt. 0) THEN  ! rank zero does not receive
             ! Receive from the left
             source = my_rank-1
-            tag = my_rank-1
-            Call MPI_IRecv(var(my_imin-1), 1, MPI_DOUBLE_PRECISION, source, & 
-                tag, MPI_COMM_WORLD, irqs(1),ierr)
+            Call MPI_Recv(rtval, 1, MPI_DOUBLE_PRECISION, source, & 
+                rbtag, MPI_COMM_WORLD, MPI_STATUS_IGNORE,ierr)
+            var(my_imin-1) = rtval
         ENDIF
         IF (my_rank .lt. (ncpu-1)) THEN ! highest rank does not send
             ! Send to the right
             dest = my_rank+1
-            tag  = my_rank
-            Call MPI_ISend(rbval, 1, MPI_DOUBLE_PRECISION, dest,tag, &
-                & MPI_COMM_WORLD,irqs(2),ierr)
+            Call MPI_Send(rbval, 1, MPI_DOUBLE_PRECISION, dest,rbtag, &
+                & MPI_COMM_WORLD,ierr)
         ENDIF
 
         !////////////////////////////////////////////////////////    
@@ -138,40 +141,36 @@ CONTAINS
         IF (my_rank .lt. (ncpu-1)) THEN ! highest rank does not receive
             ! Receive from the right
             source = my_rank+1
-            tag    = my_rank+1
-            Call MPI_IRecv(var(my_imax+1), 1, MPI_DOUBLE_PRECISION, source, & 
-                tag, MPI_COMM_WORLD, irqs(3),ierr)
+            Call MPI_Recv(ltval, 1, MPI_DOUBLE_PRECISION, source, & 
+                lbtag, MPI_COMM_WORLD, MPI_STATUS_IGNORE,ierr)
+            var(my_imax+1) = ltval
         ENDIF
         IF (my_rank .gt. 0) THEN ! rank zero does not send
             ! Send to the left
             dest = my_rank-1
-            tag  = my_rank
-            Call MPI_ISend(lbval, 1, MPI_DOUBLE_PRECISION, dest,tag, &
-                & MPI_COMM_WORLD,irqs(4),ierr)
+            Call MPI_Send(lbval, 1, MPI_DOUBLE_PRECISION, dest,lbtag, &
+                & MPI_COMM_WORLD,ierr)
         ENDIF
+
 
         
     END SUBROUTINE GHOST_ZONE_COMM
 
 
-    SUBROUTINE Laplacian(arrin, work)
+    SUBROUTINE Laplacian()
         IMPLICIT NONE
-        REAL*8, INTENT(InOut) :: arrin(my_imin-1:) ! See note in INITE_ARR about my_imin-1
-        REAL*8, INTENT(InOut) :: work(my_imin:)
-        INTEGER :: ni, imin,imax
-
-        ni = size(arrin)
+        INTEGER :: imin,imax
 
         imin = max(my_imin,2)    ! Avoid the boundaries, which are held fixed at zero
-        imax = min(my_imax,ni-1)
+        imax = min(my_imax,nx-1)
 
         DO i = imin, imax
-            work(i) =  arrin(i-1) + arrin(i+1) 
+            wrk(i) =  var(i-1) + var(i+1) 
         ENDDO
 
 
         DO i = imin, imax
-            arrin(i) = work(i)*0.5d0
+            var(i) = wrk(i)*0.5d0
         ENDDO
 
     END SUBROUTINE Laplacian
