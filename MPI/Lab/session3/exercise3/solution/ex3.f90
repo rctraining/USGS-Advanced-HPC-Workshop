@@ -4,18 +4,21 @@
 !            Based the parallelization on the 2-D domain decomposition by
 !            communicating using the row and column communicators and their associated
 !            row and column ranks.
-!            NOTE:  It will probably help you to copy and modify 
-!                   one of the ghost_zone_comm routines from session 1
 PROGRAM MAIN
     USE MPI
     USE TIMING
-    USE ISO_FORTRAN_ENV, ONLY : output_unit
+    USE ISO_FORTRAN_ENV, ONLY : output_unit,real64
     IMPLICIT NONE
     ! We use some objects of the Timer class defined in Timing.f90
     ! to profile our code.
     TYPE(Timer) :: calc_time, comm_time, init_time, wall_time
     REAL*8 :: calc_ratio, comm_ratio, init_ratio
     REAL*8, ALLOCATABLE :: var(:,:,:), wrk(:,:,:)
+    ! Here are some additional work arrays for transmitting boundary values
+    REAL*8, ALLOCATABLE :: ubvals_send(:), ubvals_recv(:)
+    REAL*8, ALLOCATABLE :: bbvals_send(:), bbvals_recv(:)
+    REAL*8, ALLOCATABLE :: lbvals_send(:), lbvals_recv(:)
+    REAL*8, ALLOCATABLE :: rbvals_send(:), rbvals_recv(:)
     INTEGER ::  nx,ny,nz,nt
     INTEGER :: i,j,k,n, ierr
     CHARACTER*120 :: msg
@@ -93,15 +96,14 @@ PROGRAM MAIN
        ' row = ', my_col_rank, ' column = ', my_row_rank, ' rank = ', my_rank
     CALL ORDERED_PRINT(msg)
 
-
     !/////////////////////////////////////////////////////
     ! Initialize var and the work array
-    ALLOCATE(var(my_imin-1:my_imax+1,my_jmin-1:my_jmax+1,1:nz))
-    ALLOCATE(wrk(1:nx,1:ny,1:nz))
+    CALL ALLOCATE_WORKSPACE()  ! all variables allocated here
     
     var(:,:,:) = 0.0d0
     wrk(:,:,:)   = 0.0d0
     CALL INIT_ARR(var, 1.0d0, 2, 2, 2) ! product of single sine waves in each dimension
+
 
 
     CALL init_time%increment()
@@ -163,8 +165,106 @@ CONTAINS
 
     SUBROUTINE GHOST_ZONE_COMM()
         IMPLICIT NONE
+        INTEGER :: ierr, dest, source
+        INTEGER :: rbtag=1, lbtag=2 ! MPI tags for the right/left boundary communication
+        INTEGER :: ubtag=1, bbtag=2 ! MPI tags for the upper/bottom boundary communication
+        !////////////////////////////////////////////////////////    
+        ! First, we communicate the right boundary values
+        ! We receive from the left and send to the right
+
+        ! Copy ghost-zone values into their respective send buffers
+        rbvals_send(my_jmin:my_jmax) = var(my_imax, my_jmin:my_jmax, 1)    
+        lbvals_send(my_jmin:my_jmax) = var(my_imin, my_jmin:my_jmax, 1)    
+
+
+        IF (my_row_rank .gt. 0) THEN  ! rank zero does not receive
+            ! Receive from the left
+            source = my_row_rank-1
+            Call MPI_Recv(lbvals_recv, my_numy, MPI_DOUBLE_PRECISION, source, & 
+                rbtag, row_comm, MPI_STATUS_IGNORE,ierr)
+            var(my_imin-1,my_jmin:my_jmax,1) = lbvals_recv(my_jmin:my_jmax)
+        ENDIF
+        IF (my_row_rank .lt. (npcol-1)) THEN ! highest rank does not send
+            ! Send to the right
+            dest = my_row_rank+1
+            Call MPI_Send(rbvals_send, my_numy, MPI_DOUBLE_PRECISION, dest,rbtag, &
+                & row_comm,ierr)
+        ENDIF
+
+        !////////////////////////////////////////////////////////    
+        ! Next, we communicate the left boundary values
+        ! We receive from the right and send to the left
+        IF (my_row_rank .lt. (npcol-1)) THEN ! highest rank does not receive
+            ! Receive from the right
+            source = my_row_rank+1
+            Call MPI_Recv(rbvals_recv, my_numy, MPI_DOUBLE_PRECISION, source, & 
+                lbtag, row_comm, MPI_STATUS_IGNORE,ierr)
+            var(my_imax+1,my_jmin:my_jmax,1) = rbvals_recv(my_jmin:my_jmax)
+        ENDIF
+        IF (my_row_rank .gt. 0) THEN ! rank zero does not send
+            ! Send to the left
+            dest = my_row_rank-1
+            Call MPI_Send(lbvals_send, my_numy, MPI_DOUBLE_PRECISION, dest,lbtag, &
+                & row_comm,ierr)
+        ENDIF
+
+        !////////////////////////////////////////////////////////    
+        ! Now, we communicate the upper/lower boundary values
+
+        ! Copy ghost-zone values into their respective send buffers
+        ubvals_send(my_imin:my_imax) = var(my_imin:my_imax,my_jmax,1)    
+        bbvals_send(my_imin:my_imax) = var(my_imin:my_imax,my_jmin,1)    
+
+        IF (my_col_rank .gt. 0) THEN  ! rank zero does not receive
+            ! Receive from below
+            source = my_col_rank-1
+            Call MPI_Recv(bbvals_recv, my_numx, MPI_DOUBLE_PRECISION, source, & 
+                bbtag, col_comm, MPI_STATUS_IGNORE,ierr)
+            var(my_imin:my_imax,my_jmin-1,1) = bbvals_recv(my_imin:my_imax)
+        ENDIF
+        IF (my_col_rank .lt. (nprow-1)) THEN ! highest rank does not send
+            ! Send above
+            dest = my_col_rank+1
+            Call MPI_Send(ubvals_send, my_numx, MPI_DOUBLE_PRECISION, dest,bbtag, &
+                & col_comm,ierr)
+        ENDIF
+
+        !////////////////////////////////////////////////////////    
+        ! Next, we communicate the left boundary values
+        ! We receive from the right and send to the left
+        IF (my_col_rank .lt. (nprow-1)) THEN ! highest rank does not receive
+            ! Receive from above
+            source = my_col_rank+1
+            Call MPI_Recv(ubvals_recv, my_numx, MPI_DOUBLE_PRECISION, source, & 
+                lbtag, col_comm, MPI_STATUS_IGNORE,ierr)
+            var(my_imin:my_imax,my_jmin+1,1) = ubvals_recv(my_imin:my_imax)
+        ENDIF
+        IF (my_col_rank .gt. 0) THEN ! rank zero does not send
+            ! Send to below
+            dest = my_col_rank-1
+            Call MPI_Send(bbvals_send, my_numx, MPI_DOUBLE_PRECISION, dest,lbtag, &
+                & col_comm,ierr)
+        ENDIF
+
 
     END SUBROUTINE GHOST_ZONE_COMM
+
+    SUBROUTINE ALLOCATE_WORKSPACE()
+
+        IMPLICIT NONE
+
+        ALLOCATE(var(my_imin-1:my_imax+1,my_jmin-1:my_jmax+1,1:nz))
+        ALLOCATE(wrk(1:nx,1:ny,1:nz))
+
+        ALLOCATE(lbvals_send(my_jmin:my_jmax),lbvals_recv(my_jmin:my_jmax))
+        ALLOCATE(rbvals_send(my_jmin:my_jmax),rbvals_recv(my_jmin:my_jmax))
+
+
+        ALLOCATE(bbvals_send(my_imin:my_imax), bbvals_recv(my_imin:my_imax))
+        ALLOCATE(ubvals_send(my_imin:my_imax), ubvals_recv(my_imin:my_imax))
+
+    END SUBROUTINE ALLOCATE_WORKSPACE
+
 
     SUBROUTINE ORDERED_PRINT(message)
         IMPLICIT NONE

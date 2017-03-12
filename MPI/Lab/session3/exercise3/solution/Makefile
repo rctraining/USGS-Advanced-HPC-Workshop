@@ -1,5 +1,5 @@
 PROG = ex3
-include ../../build_flags.inc
+include ../../../build_flags.inc
 
 
 
