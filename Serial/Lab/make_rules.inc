@@ -20,15 +20,13 @@ LD = g++
 #
 # Compiler flags
 #
-FCFLAGS = -Wall -Werror -Wextra -fopenmp
+FCFLAGS = -Wall -Werror -Wextra
 FCFLAGS_DBG = -g -O0 -DDEBUG
 FCFLAGS_REL = -Ofast -ftree-vectorize -fopt-info-vec-all
 
-CXX_FLAGS =  -Wall -Werror -Wextra -fopenmp
+CXX_FLAGS =  -Wall -Werror -Wextra
 CXXFLAGS_DBG = -g -O0 -DDEBUG
 CXXFLAGS_REL = -Ofast -DNDEBUG -ftree-vectorize -fopt-info-vec-all
-
-LDFLAGS = -fopenmp
 
 ifeq (.f90 ,$(findstring .f90, $(SRCS)))
 	LD = $(FC)

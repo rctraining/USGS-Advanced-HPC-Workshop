@@ -39,10 +39,13 @@ PROGRAM approx_pi
   h = 1.0_dp/ DBLE(n)
 
   sum  = 0.0_DP
+  !$OMP PARALLEL DO PRIVATE(x), SHARED(h,n, sum)
   DO i = 1, n
      x = h * (DBLE(i) - 0.5_dp)
+     !$OMP CRITICAL
      sum = sum + f(x)
   ENDDO
+  !$OMP END PARALLEL DO
   pi = h * sum
 
 
