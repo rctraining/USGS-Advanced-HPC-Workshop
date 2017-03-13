@@ -1,10 +1,7 @@
 PROG = ex3
 GPU_OUT = gpu
 SERIAL_OUT = serial
-FC = pgfortran
-FCFLAGS_GPU = -acc -fast -ta=tesla -Minfo=accel
-FCFLAGS_SERIAL = -fast
-
+include ../../build_flags.inc
 $(PROG): $(PROG).f90
 	$(FC) $(FCFLAGS_GPU) -o $(PROG).$(GPU_OUT) $<
 	$(FC) $(FCFLAGS_SERIAL) -o $(PROG).$(SERIAL_OUT) $<
