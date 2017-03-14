@@ -16,7 +16,7 @@ LD = icpc
 #
 # Compiler flags
 #
-FCFLAGS = -openmp
+FCFLAGS = -qopenmp
 FCFLAGS_DBG = -g -O0 -DDEBUG
 FCFLAGS_REL = -Ofast -g -vec-report=6
 
