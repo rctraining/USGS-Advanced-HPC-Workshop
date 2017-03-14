@@ -44,6 +44,7 @@ PROGRAM approx_pi
      x = h * (DBLE(i) - 0.5_dp)
      !$OMP CRITICAL
      sum = sum + f(x)
+     !$OMP END CRITICAL
   ENDDO
   !$OMP END PARALLEL DO
   pi = h * sum
