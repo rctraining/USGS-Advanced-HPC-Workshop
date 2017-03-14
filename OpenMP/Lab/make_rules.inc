@@ -1,13 +1,9 @@
 OBJS = $(SRCS:.f90=.o)
 
-CC = gcc
-CXX = g++
-FC = gfortran
-LD = g++
-
-# for intel using icc and ifort
-#CC = icc
-#FC = ifort
+CC = icc
+CXX = icpc
+FC = ifort
+LD = icpc
 
 # Note:
 # The opt-report levels for Intel compilers are:
@@ -20,15 +16,15 @@ LD = g++
 #
 # Compiler flags
 #
-FCFLAGS = -Wall -Werror -Wextra -fopenmp
+FCFLAGS = -openmp
 FCFLAGS_DBG = -g -O0 -DDEBUG
-FCFLAGS_REL = -Ofast -ftree-vectorize -fopt-info-vec-all
+FCFLAGS_REL = -Ofast -g -vec-report=6
 
-CXX_FLAGS =  -Wall -Werror -Wextra -fopenmp
+CXX_FLAGS =  -openmp
 CXXFLAGS_DBG = -g -O0 -DDEBUG
-CXXFLAGS_REL = -Ofast -DNDEBUG -ftree-vectorize -fopt-info-vec-all
+CXXFLAGS_REL = -Ofast -DNDEBUG -g -vec-report=6
 
-LDFLAGS = -fopenmp
+LDFLAGS = -openmp
 
 ifeq (.f90 ,$(findstring .f90, $(SRCS)))
 	LD = $(FC)
