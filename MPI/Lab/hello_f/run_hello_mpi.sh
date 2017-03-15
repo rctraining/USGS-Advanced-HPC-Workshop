@@ -7,6 +7,7 @@
 #SBATCH --ntasks-per-node=20
 
 module load intel/psxe-2015
+module load mpi/mpich-3.2-intel
 
 srun --mpi=pmi2 ./mpi_hello
 
