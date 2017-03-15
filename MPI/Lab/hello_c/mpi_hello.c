@@ -14,6 +14,7 @@ int main (int argc, char *argv[])
   ierr = MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
   ierr = MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
   ierr = MPI_Get_processor_name(proc_name, &length);
+
   printf("Hello World from process = %d on processor %s\n", comm_rank, proc_name);
   result = exp((double) comm_rank);
   printf("Exp(%d) = %f\n", comm_rank, result);
