@@ -5,6 +5,7 @@
 Load Intel compilers
 ```
 module load intel/psxe-2015
+module load mpi/mpich-3.2-intel
 ```
 
 Compile for speed ```-Ofast``` and add information about line numbers ```-g```
@@ -21,6 +22,12 @@ mpifc -g -O0 -o myprogram myprogram.f90
 
 ## Running an MPI program on Yeti
 
+### Interactive job
+
+sinteractive --reservation=training_normal -A training -p normal -N2 --ntasks-per-node=20 -t 3:00:00
+
+### Batch job
+
 Job script for an MPI run on normal partion
 ```
 #!/bin/bash
@@ -34,6 +41,13 @@ Job script for an MPI run on normal partion
 module load intel/psxe-2015
 
 srun --mpi=pmi2 ./mpi_hello
+```
+
+## Debugging
+
+```
+module load allinea/6.0.6
+ddt ./your_program
 ```
 
 ## Writing a parallel "hello world" program
