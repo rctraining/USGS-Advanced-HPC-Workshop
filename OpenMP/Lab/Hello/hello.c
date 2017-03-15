@@ -3,7 +3,7 @@ main ()  {
 
 int nthreads, tid;
 
- ntreads = 1;
+ nthreads = 1;
  tid = 0;
  printf("Hello World from thread = %d\n", tid);
 

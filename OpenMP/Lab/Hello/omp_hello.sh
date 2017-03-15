@@ -9,7 +9,7 @@
 
 module load intel
 
-ifort -qopenmp omp_hello.f -o hello
+ifort -qopenmp omp_hello.f90
 
 echo "Running on the default number of cores"
 ./hello
