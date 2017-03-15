@@ -46,6 +46,7 @@ srun --mpi=pmi2 ./mpi_hello
 ```
 use mpi
 MPI_COMM_WORLD
+MPI_MAX_PROCESSOR_NAME
 MPI_INIT(IERROR) ! integer argument
 MPI_COMM_SIZE(COMM, SIZE, IERROR) ! all arguments are integer
 MPI_COMM_RANK(COMM, RANK, IERROR) ! all arguments are integer
@@ -56,6 +57,7 @@ MPI_FINALIZE(IERROR) ! integer argument
 
 ```
 MPI_Comm MPI_COMM_WORLD
+MPI_MAX_PROCESSOR_NAME
 int MPI_Init(int *argc, char ***argv)
 int MPI_Comm_size(MPI_Comm comm, int *size)
 int MPI_Comm_rank(MPI_Comm comm, int *rank)

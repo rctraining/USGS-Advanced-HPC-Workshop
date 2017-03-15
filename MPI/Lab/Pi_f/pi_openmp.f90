@@ -40,7 +40,7 @@ PROGRAM main
   h = 1.0d0/n
 
   sum  = 0.0d0
-!$OMP  do default(none), private(i,x), shared(n, h), reduction(+:sum)
+!$OMP parallel do default(none), private(i,x), shared(n, h), reduction(+:sum)
   DO i = 1, n
      x = h * (DBLE(i) - 0.5d0)
      sum = sum + f(x)
