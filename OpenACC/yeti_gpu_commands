@@ -1,7 +1,14 @@
-# Command 1:  Request a GPU session for 2 hours --- DOES NOT GET YOU ONTO GPU NODE...
+USAGE  :  Command 1 & Command 3   OR Command 2a,2b & Command 3
+
+#Command 1:
+sinteractive -A training -p UV --gres=gpu:tesla:1 --reservation=training_UV -t 30:00 -n 4
+
+#IF COMMAND 1 DOES NOT WORK, USE COMMAND 2a AND 2b:
+
+# Command 2a:  Request a GPU session for 2 hours --- DOES NOT GET YOU ONTO GPU NODE...
 salloc -A training -p UV --reservation=training_UV --gres=gpu:tesla:1 -t 120
 
-# Command 2:  Once the cores are available, log onto the GPU node
+# Command 2b:  Once the cores are available, log onto the GPU node
 srun -n 1 --pty bash
 
 # Command 3:  Add the PGI compiler tools to your path
