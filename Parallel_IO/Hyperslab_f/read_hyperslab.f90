@@ -21,8 +21,8 @@ PROGRAM DATASET_BY_COL
   INTEGER(HID_T) :: memspace      ! Dataspace identifier in memory
   INTEGER(HID_T) :: plist_id      ! Property list identifier 
 
-  INTEGER(HSIZE_T), DIMENSION(2) :: dimsf = (/5,8/) ! Dataset dimensions.
-  INTEGER(HSIZE_T), DIMENSION(2) :: dimsfi = (/5,8/)
+  INTEGER(HSIZE_T), DIMENSION(2) :: dimsf ! Dataset dimensions.
+  INTEGER(HSIZE_T), DIMENSION(2) :: dimsfi
 
   INTEGER(HSIZE_T), DIMENSION(2) :: count  
   INTEGER(HSSIZE_T), DIMENSION(2) :: offset 
@@ -42,6 +42,11 @@ PROGRAM DATASET_BY_COL
   CALL MPI_INIT(mpierror)
   CALL MPI_COMM_SIZE(comm, mpi_size, mpierror)
   CALL MPI_COMM_RANK(comm, mpi_rank, mpierror) 
+
+  if (mpi_rank == 0) then
+     write(*,*) "Running in parallel on ", mpi_size, " processes"
+  end if
+
   !
   ! Initialize FORTRAN predefined datatypes
   !
@@ -56,21 +61,17 @@ PROGRAM DATASET_BY_COL
   !
   ! Create the file collectively.
   ! 
-  CALL h5fcreate_f(filename, H5F_ACC_TRUNC_F, file_id, error, access_prp = plist_id)
+  CALL h5fopen_f(filename, H5F_ACC_RDONLY_F, file_id, error, access_prp = plist_id)
   CALL h5pclose_f(plist_id, error)
+ 
   !
-  ! Create the data space for the  dataset. 
+  ! Open the dataset with default properties.
   !
-  dimsf(1) = 5
-  dimsf(2) = mpi_size*2
-  CALL h5screate_simple_f(rank, dimsf, filespace, error)
+  CALL h5dopen_f(file_id, dsetname, dset_id, error)
 
-  !
-  ! Create the dataset with default properties.
-  !
-  CALL h5dcreate_f(file_id, dsetname, H5T_NATIVE_INTEGER, filespace, &
-       dset_id, error)
-  CALL h5sclose_f(filespace, error)
+  CALL h5dget_space_f(dset_id, filespace, error)
+  CALL h5sget_simple_extent_ndims_f (filespace, rank, error)
+  call h5sget_simple_extent_dims_f (filespace, dimsf, dimsfi, error)
   !
   ! Each process defines dataset in memory and writes it to the hyperslab
   ! in the file. 
@@ -83,13 +84,11 @@ PROGRAM DATASET_BY_COL
   ! 
   ! Select hyperslab in the file.
   !
-  CALL h5dget_space_f(dset_id, filespace, error)
   CALL h5sselect_hyperslab_f (filespace, H5S_SELECT_SET_F, offset, count, error)
   ! 
   ! Initialize data buffer with trivial data.
   !
   ALLOCATE ( data(count(1),count(2)))
-  data = mpi_rank + 10
   !
   ! Create property list for collective dataset write
   !
@@ -97,20 +96,15 @@ PROGRAM DATASET_BY_COL
   CALL h5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, error)
 
   !
-  ! Write the dataset collectively. 
+  ! Read the dataset collectively. 
   !
-  CALL h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, data, dimsfi, error, &
+  CALL h5dread_f(dset_id, H5T_NATIVE_INTEGER, data, dimsf, error, &
        file_space_id = filespace, mem_space_id = memspace, xfer_prp = plist_id)
-  !
-  ! Write the dataset independently. 
-  !
-  !    CALL h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, data, dimsfi, error, &
-  !                     file_space_id = filespace, mem_space_id = memspace)
-  !
-  ! Deallocate data buffer.
-  !
-  DEALLOCATE(data)
 
+
+  !
+  write(*,*) "Rank ", mpi_rank, "data(1,1) = ", data(1,1)
+  DEALLOCATE(data)
   !
   ! Close dataspaces.
   !
