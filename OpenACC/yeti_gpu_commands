@@ -12,5 +12,8 @@ salloc -A training -p UV --reservation=training_UV --gres=gpu:tesla:1 -t 120
 srun -n 1 --pty bash
 
 # Command 3:  Add the PGI compiler tools to your path
-export PATH=$PATH:/cxfs/projects/software/pgi/linux86-64/16.10/bin
+module load pgi
+
+#IGNORE THIS
+#export PATH=$PATH:/cxfs/projects/software/pgi/linux86-64/16.10/bin
 
